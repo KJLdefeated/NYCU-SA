@@ -1,0 +1,7 @@
+[Definition]
+
+actionstart =
+actionstop =
+actioncheck =
+actionban = ipfw add 1 deny tcp from <ip> to me 80,443
+actionunban = ipfw delete 1

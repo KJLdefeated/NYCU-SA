@@ -1,0 +1,8 @@
+# Initial setting
+/bin/sh /etc/rc.firewall open
+
+# fail2ban IPs
+if ! ipfw table 1 info > /dev/null 2>&1; then
+  ipfw table 1 create
+  ipfw table 1 flush
+fi

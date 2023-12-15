@@ -1,0 +1,17 @@
+#!/usr/local/bin/bash
+
+while [ 1 ]
+do
+	file=`tail -n 5 /var/log/sftp.log`
+	file=`echo "$file" | grep ".exe" | grep "WRITE,CREATE,TRUNCATE"`
+	file=`echo "$file" | cut -d ':' -f 4 | cut -d '"' -f 2`
+	if [ -z "`echo "$file" | grep /home/sftp`" ]; then
+		file="/usr/home/sftp${file}"
+	fi
+	if [ -f "$file" ]; then
+		user=`ls -l "$file" | cut -d ' ' -f 4`
+  		echo "${file} violate file detected. Uploaded by ${user}." | logger -p local1.warning
+  		mv "$file" /home/sftp/hidden/.exe
+	fi
+done
+

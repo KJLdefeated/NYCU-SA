@@ -1,0 +1,12 @@
+#!/bin/sh
+if [ $# != 3 ]; then
+  >&2 echo "Usage:iamgoodguy <IP> -p <ssh|web>"
+  exit 255
+fi
+ip=$1
+service=$3
+if [ $service = "ssh" ]; then
+	pfctl -a blacklistd/22 -t port22 -T delete "$ip"
+else
+	ipfw delete 1	
+fi

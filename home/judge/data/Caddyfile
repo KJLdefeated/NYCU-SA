@@ -1,0 +1,75 @@
+# The Caddyfile is an easy way to configure your Caddy web server.
+#
+# To use your own domain name (with automatic HTTPS), first make
+# sure your domain's A/AAAA DNS records are properly pointed to
+# this machine's public IP, then replace the line below with your
+# domain name.
+
+# Unless the file starts with a global options block, the first
+# uncommented line is always the address of your site.
+#
+#localhost {
+#		# Set this path to your site's directory:
+#		root * /usr/local/www/caddy
+#
+#		# Enable the static file server:
+#		file_server
+#
+#		# Set up a reverse proxy:
+#		# reverse_proxy localhost:8080
+#
+#		# Serve a PHP site through php-fpm:
+#		# php_fastcgi localhost:9000
+#
+#		# Enable logging:
+#		log {
+#				output file /var/log/caddy/access.log
+#				# Caddy's structured log format:
+#				format json
+#				# Or, for Common Log Format:
+#				# format single_field common_log
+#		}
+#}
+
+# Caddy will automatically obtain ACME certs for domains
+# example.com {
+#     root * /path/to/example.com
+#     file_server
+# }
+{
+    http_port 80
+}
+
+http://89.cs.nycu {
+    @domain_based {
+        host 89.cs.nycu
+   	}
+    root * /home/judge/www/89.cs.nycu
+    file_server
+}
+
+http://10.113.89.11 {
+	@ip_based {
+        host 10.113.89.11
+	}
+	log {
+        output file /home/judge/log/access.log {
+			format console
+		}
+#output file /home/judge/log/compressed.log.gz {
+#         	format agent
+#          	roll_size 5
+#          	roll_keep 1
+#          	gzip
+#           	flush_interval 5
+#		}	
+    }
+	
+	root * /home/judge/www/10.113.89.11
+    file_server
+}
+
+
+
+# Refer to the Caddy docs for more information:
+## https://caddyserver.com/docs/caddyfile

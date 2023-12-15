@@ -1,0 +1,189 @@
+#!/usr/local/bin/bash
+
+function help() {
+cat << EOF
+Usage:
+- create: zfsbak DATASET [ROTATION_CNT]
+- list: zfsbak -l|--list [DATASET|ID|DATASET ID...]
+- delete: zfsbak -d|--delete [DATASET|ID|DATASET ID...]
+- export: zfsbak -e|--export DATASET [ID]
+- import: zfsbak -i|--import FILENAME DATASET
+EOF
+}
+
+function datetime() {
+  date '+%Y-%m-%d-%H:%M:%S'
+}
+
+function zfs_snap() {
+  echo "Snap $1"
+  zfs snapshot "$1"
+}
+
+function zfs_destroy() {
+  echo "Destroy $1"
+  zfs destroy "$1"
+}
+
+function zfs_list() {
+  # echo "zfs_list $1 $2"
+  # echo "dataset: ${1}, ID: ${2}"
+  if [ "$1" = "mypool" ] && [ "$2" = "" ];then
+	  # echo "no args"
+	  zfs list -H -o name -r -t snapshot | grep "@zfsbak_" | awk '{print NR "\t" $0}'
+  else
+ 	  zfs list -H -o name -r -t snapshot "$1" | grep "@zfsbak_" | grep "$1" | awk '{print NR "\t" $0}' | grep "^$2"
+  fi 
+}
+
+function zfsbak_create() {
+  # dataset="$1"
+
+  local list=()
+  while IFS= read -r line; do
+	  list+=("$line")
+  done < <(zfs list | grep -v ^NAME | grep "$1" | awk '{print $1}')
+
+  rotation="${2-12}"
+  for dataset in "${list[@]}"
+  do
+	  # echo "$dataset"
+	  if [ "$(echo "$dataset" | tr "@" " " | awk '{print $1}')" = "$1" ];then
+		  echo "Snap $1@zfsbak_$(datetime)"
+	  fi
+	  if [[ "$dataset" == "$1"/* || "$dataset" == "$1" ]]; then
+	  zfs snapshot "$dataset@zfsbak_$(datetime)"
+	  for snap in $(zfs_list "$dataset" | grep "${dataset}@" | awk '{ print $2 }' | tail -r | tail -n "+$((rotation+1))" | tail -r);do
+		  if [ "$(echo "$dataset" | tr "@" " " | awk '{print $1}')" = "$1" ]; then
+			  echo "Destroy $snap"
+		  fi
+		  zfs destroy "$snap"
+	  done
+	  fi
+  done
+
+  #for snap in $(zfs_list "$dataset" | awk '{ print $2 }' | tail -r | tail -n "+$((rotation+1))" | tail -r); do
+    #zfs_destroy "$snap"
+  #done
+}
+
+function parse_dataset_id() {
+  dataset="${1-mypool}"
+  id=""
+  #echo "num of args:$#"
+  if [[ "$dataset" != mypool* ]]; then
+   id="$dataset" 
+    dataset="mypool"
+  fi
+  if [ $# -ge 1 ] && [ "$dataset" == "mypool" ] ; then
+    if [ "$1" == "mypool" ]; then
+	id="${@:2}"
+    else 
+	id="${@:1}"
+    fi
+elif [ $# -ge 2 ] && [ "$dataset" != "mypool" ] ; then
+	id="${@:2}"
+  fi
+}
+
+function zfsbak_list() {
+  parse_dataset_id "$@"
+  echo -e "ID\tDATASET\t\tTIME"
+  #echo "dataset: $dataset, id: $id"
+  index=1
+  id=($id)
+  id=($(printf "%s\n" "${id[@]}" | sort -n))
+  id_index=0
+    local list=()
+    while IFS= read -r line; do
+      list+=("$line")
+    done < <(zfs list -H -o name -r -t snapshot "$dataset" | grep "zfsbak_" | sort -t@ -k 2,2 -k 1,1 | awk -F@ '{print $1 " " $2}')
+    #echo $(zfs list -H -o name -r -t snapshot "$dataset" | grep "zfsbak_" | sort -t@ -k 2,2 -k 1,1 | awk -F@ '{print $1 " " $2}')
+    time_tmp=$(echo "")
+    name_tmp=$(echo "")
+    for pair in "${list[@]}";do
+      name=$(echo "$pair" | awk '{print $1}')
+      time=$(echo "$pair" | awk '{print $2}' | sed 's/zfsbak_//')
+      if [ "$dataset" == "mypool" ]; then
+	      dataset="$name"
+      fi
+      if [[ "$name" != "$dataset" && "$name" != "$dataset"/* ]]; then
+	      dataset="$name"
+	      time_tmp=""
+      fi
+      #echo dataset: "$dataset" name: "$name" time: "$time" time_tmp: "$time_tmp"
+      if [ "$time" != "$time_tmp" ] && [[ "$name" == "$dataset" || "$name" == "$dataset"/* ]]; then
+        time_tmp="$time"
+        #echo "new time: $time_tmp"
+	#name_tmp="$name"
+	#echo "name_tmp: $name_tmp"
+        if [ "${#id[@]}" -eq 0 ]; then
+          echo -e "$index\t$name\t\t$time"
+  	elif [[ "${id[$id_index]}" == "$index" ]];then
+	  echo -e "$index\t$name\t\t$time"
+	  id_index=$(($id_index+1))
+        fi
+	index=$(($index+1))
+      fi
+
+      #echo "new index: $index"
+    done
+}
+
+function zfsbak_delete() {
+  parse_dataset_id "$@"
+  #echo "$dataset $id"
+  for snap in $(zfsbak_list "$dataset" "$id" | awk '{ print $2 "@zfsbak_" $3 }'); do
+	  #echo "$snap"	
+	  if ! [ $(echo "$snap" | grep "DATASET") ];then
+	  echo "Destroy $snap"
+	  zfs destroy -r "$snap"
+	  #id_index=$((id_index+1))
+	  fi
+  done
+}
+
+function zfsbak_export() {
+    dataset="${1?'dataset'}"
+    id="${2-1}"
+    snapname="$(zfs_list "$dataset" "$id" | awk '{ print $2 }')"
+    timestamp="`echo ${snapname} | cut -d '@' -f 2`"
+    # echo "dataset: $dataset, timestamp: $timestamp, snapname: $snapname" 
+    EXPORT_PASS=${ZFSBAK_PASS:-''}
+    pathname="$HOME/${dataset/\//_}@${timestamp}.zst.aes"
+    # rm -fr "$pathname"
+	# echo $snapname
+    zfs send ${snapname} | zstd -qc - | openssl enc -aes-256-cbc -pbkdf2 -pass "pass:$EXPORT_PASS" -e > "$pathname"
+    echo "Export $snapname to $pathname"
+}
+
+function zfsbak_import() {
+  filename="${1?'filename'}"
+  dataset="${2?'dataset'}"
+  echo "Import $filename to $dataset"
+  #if [ -z "`zfs list | grep "$dataset"`" ]; then
+	#  zfs create -p $dataset
+  #fi
+  zstd -dcq "$filename" | zfs receive "$dataset"
+  list=$(ls "$(echo "$dataset" | sed 's/mypool/\/home\/sftp/')")
+  list=($list)
+  for file in "${list[@]}";do
+      zfs create "$dataset/$file"
+  done 
+  zfsbak_delete "$dataset"
+  zfsbak_create "$dataset"
+}
+
+case "$1" in
+  -l|--list)   shift; zfsbak_list   "$@" ;;
+  -d|--delete) shift; zfsbak_delete "$@" ;;
+  -e|--export) shift; zfsbak_export "$@" ;;
+  -i|--import) shift; zfsbak_import "$@" ;;
+  *)
+    if [ $# == 0 ]; then
+      help
+    else
+      zfsbak_create "$@"
+    fi
+    ;;
+esac
